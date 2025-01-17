@@ -1,0 +1,203 @@
+module alu (opcode, a, b, result);
+    input signed [5:0] opcode;
+    input signed [31:0] a, b; 
+    output reg signed [31:0] result;
+
+    always @ (*) begin
+        case(opcode)
+            6'b000100: result = a + b;
+            6'b001011: result = a - b;
+            6'b001000: result = (a < 0) ? -a : a; 
+            6'b000110: result = -a;
+            6'b001101: result = (a > b) ? a : b;
+            6'b001110: result = (a < b) ? a : b; 
+            6'b000111: result = (a+b)/2; 
+            6'b001001: result = ~a; 
+            6'b001100: result = a | b;
+            6'b001010: result = a & b;
+            6'b000101: result = a ^ b;
+            default: result = 0; 
+        endcase
+    end
+endmodule
+
+ `timescale 1ns / 1ps
+
+
+
+
+module reg_file (clk, valid_opcode, addr1, addr2, addr3, in , out1, out2);
+input clk;// The clock signal
+ input valid_opcode;		// A signal indicating if the opcode is valid and if a read or write should be performed
+
+input [4:0] addr1, addr2, addr3;// addr1 Address for reading the first operand	addr2 Address for reading the second operand   addr3 // Address for writing the result
+input [31:0] in;// Data to be written into the register at addr3
+output  reg  [31:0] out1, out2;	// out1 Output for the first read operand and out2 Output for the second read operand
+	
+	// Initialize memory with predefined values.
+	reg signed[31:0] memory [0:31] = {
+    32'h00000000, 32'h00001066, 32'h000015DC, 32'h0000385A, 32'h00001DBC,
+    32'h000019EE, 32'h00002738, 32'h00000F5A, 32'h00001036, 32'h00001906,
+    32'h00001518, 32'h0000217C, 32'h00003FC4, 32'h00002288, 32'h00002042,
+    32'h00002BDC, 32'h0000210E, 32'h000033E4, 32'h00001244, 32'h00000F8C,
+    32'h00001602, 32'h00001DD0, 32'h00002676, 32'h00001542, 32'h000030C8,
+    32'h00001A00, 32'h00000340, 32'h00001238, 32'h00001A8E, 32'h00003756,
+    32'h00000CAE, 32'h00000000
+};
+
+  always @(*) // Combinatorial always block for reading from the register file.
+
+		begin  
+			if(valid_opcode) // If the opcode is valid, output the data from the addressed registers.
+        
+				begin
+            out1 = memory[addr1];
+            out2 = memory[addr2];
+		end
+		end
+	always @(posedge clk) begin	// Sequential always block for writing to the register file.
+		
+		
+        if (valid_opcode) begin
+          
+            memory[addr3] = in;
+		end
+		
+    end	
+	
+ 
+
+endmodule  
+
+module register(  // The register module is responsible for decoding parts of the instruction
+// to obtain the opcode and the addresses for the source and destination registers.
+
+   input [31:0] instruction,  // The full instruction from which to decode the fields
+    input clock,               // The clock signal to synchronize the decoding operation
+    output reg [4:0] addr1,    // The address of the first source register
+    output reg [4:0] addr2,    // The address of the second source register
+    output reg [4:0] addr3,    // The address of the destination register
+    output reg [5:0] opcode    // The opcode determining the operation to perform
+);
+always @(posedge clock) begin 
+	
+        opcode = instruction[5:0]; 
+        addr1 = instruction[10:6];  
+        addr2 = instruction[15:11];  
+        addr3 = instruction[20:16];  
+        
+    end
+endmodule
+
+
+			
+	
+
+module mp_top (clk, instruction , result );// The mp_top module is the top-level module that integrates the register, reg_file, and alu modules.
+// It serves as the microprocessor's core, decoding instructions, fetching operands, executing operations, and writing back results.
+	input clk;
+    input [31:0] instruction;
+    output reg signed [31:0] result; 
+    wire [4:0] address1, address2, address3;
+    wire [5:0] opcode;
+    wire enable; 
+    wire [31:0] out1, out2 ;
+				  // Instance of the register module that decodes the instruction
+ register reg_inst (.instruction(instruction),.clock(clk),.addr1(address1),.addr2(address2),.addr3(address3),.opcode(opcode));	
+ // Combinatorial logic to generate the enable signal based on the opcode
+    // The enable signal is true if the opcode corresponds to a valid operation
+  assign enable = (opcode == 6'b000100) || // Add
+                (opcode == 6'b001011) || // Subtract
+                (opcode == 6'b001000) || // Absolute value
+                (opcode == 6'b000110) || // Negate
+                (opcode == 6'b001101) || // Max
+                (opcode == 6'b001110) || // Min
+                (opcode == 6'b000111) || // avg
+                (opcode == 6'b001001) || // Bitwise NOT
+                (opcode == 6'b001100) || // Bitwise OR
+                (opcode == 6'b001010) || // Bitwise AND
+                (opcode == 6'b000101);   // Bitwise XOR
+
+	  	    // Instance of the reg_file module that provides read/write access to registers
+   reg_file reg_file_inst (.clk(clk), .valid_opcode(enable), .addr1(address1), .addr2(address2), .addr3(address3), .in( result) , .out1(out1), .out2(out2));
+   				   // Instance of the alu module that performs arithmetic and logic operations
+   alu alu_inst(.opcode(opcode),.a(out1),.b(out2),.result( result)); 
+endmodule	
+
+   
+
+
+
+
+module tb_top;
+  reg [31:0] instruction;
+  wire [31:0] result;
+	  reg clk;
+  mp_top u1 (.clk(clk),.instruction(instruction),.result(result));
+  initial begin
+    clk = 0;
+    repeat (100) #5 clk = ~clk;  
+  end
+  // Testbench stimulus
+  initial begin
+    reg [31:0] expected_results [0:10];
+		                                //  0  1    2	3	 4	  5	     6	   7	8	 9	 10	 11	  12   13	 
+   			/*  reg [31:0] memRam [0:31]='{0,4198,5596,14426,7612,6638,10040,3930,4150,6406,5400,8572,16324,8840,
+				  14  15	 16   17	18	19	20	 21	 22	 23	   24	 25	  26   27	28	 29	  30  31
+			   8258,11228,8462,13284,4676,3980,5634,7632,9846,5442,12488,6656,832,4664,6798,14166,3246,0};	   */
+				  
+   reg [0:31]instructions[0:10] = '{32'b00000000000000000111000011000100,// add mem[3] , mem[14] put in mem[0]
+	                                32'b00000000000000100001000110001011,//sub mem[6]- mem[2]  put in mem[2]
+									32'b00000000000000000000001110001000,// |mem[14]| put in mem[0]
+									32'b00000000000000000000001101000110, 	 //  -mem[13]  put in mem[0]
+									32'b00000000000111000110101010001101, // mem [13] > mem[10] (max)  put in mem[28]
+									32'b00000000000000011000110000001110, //mem[16]<mem[17])(min) put in mem[1]
+									32'b00000000000000000110001111000111,// mem[15] +mem[12]/2 put in mem[0]
+									32'b00000000000000000000001001001001,// ~mem[9] put in mem[0]
+									32'b00000000000110100101111011001100,//mem[27] or mem[11] put in mem[26] 
+									32'b0000000000000000010111110001010, // mem[30]and mem[5] put in mem[0]
+									32'b00000000000100000101110100000101//mem[20]xor mem[11] put in mem[16]
+									
+									};									
+integer i;
+integer pass_counter =0;
+    // Expected results
+    expected_results[0] = 32'h589C;
+    expected_results[1] = 32'b1000101011100;
+    expected_results[2] = 32'h2042;
+    expected_results[3] = 32'b11111111111111111101110101111000;
+    expected_results[4] = 32'h2288;
+    expected_results[5] = 32'h210E;
+    expected_results[6] = 32'd 13776;
+    expected_results[7] = 32'b11111111111111111110011011111001;
+    expected_results[8] = 32'b11001101111100;
+    expected_results[9] = 32'b100010101110;
+	expected_results[10] = 32'h377E; 
+	
+    
+    for (i = 0; i < 11; i = i + 1) begin
+      instruction = instructions[i];
+      #25;
+	  if(result!= expected_results[i]&&result==0) /*because if the opcode is invalid at the alu it returns 0 and i want to ensure that the zero result
+		                                          is not the correct result i addrd result!=expected results      */    
+		  begin
+			 $display("# Test %0d: Instruction = %b,  --> Failed invalid opcode", i + 1, instruction);
+			 end
+     else if (result === expected_results[i]) begin
+        $display("# Test %0d: Instruction = %b, Expected = %d, result = %d --> Passed", i + 1, instruction, expected_results[i], result); 
+		pass_counter=pass_counter+1;
+      end
+      else begin
+        $display("# Test %0d: Instruction = %b, Expected = %d, result = %d --> Failed error in allocation", i + 1, instruction, expected_results[i], result);
+      end
+    end
+	
+	 if (pass_counter == 11) begin
+            $display("All test cases passed.");
+        end else begin
+            $display("There is at least one fail.");
+        end
+
+        $finish; // End the simulation
+  end
+  endmodule
